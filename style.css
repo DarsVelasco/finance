@@ -1,0 +1,36 @@
+html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh; /* ensures body always fills viewport */
+    position: relative; /* for watermark pseudo-element */
+}
+
+/* Watermark pseudo-element */
+body::before {
+    content: "";
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    width: 500px;             /* set a fixed size */
+    height: 500px;            /* maintain aspect ratio */
+    background: url('logo.png') no-repeat center center;
+    background-size: contain; /* keeps proportions, fits inside box */
+    opacity: 0.05;            /* faint watermark */
+    pointer-events: none;
+    transform: translate(-50%, -50%); /* center it */
+    z-index: -1;
+}
+
+main {
+    flex: 1; /* takes remaining space */
+}
+
+footer {
+    margin-top: auto; /* pushes footer to bottom */
+}
