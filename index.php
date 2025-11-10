@@ -29,6 +29,7 @@ include 'header.php';
         </div>
       </div>
     </div>
+  
     <div class="col-md-4">
       <div class="card border-danger shadow-sm">
         <div class="card-body">
@@ -46,6 +47,12 @@ include 'header.php';
       </div>
     </div>
   </div>
+  <div class="text-center mb-4">
+  <a href="report_selector.php" class="btn btn-outline-primary">
+    <i class="bi bi-file-earmark-pdf"></i> Download PDF Report
+  </a>
+</div>
+
 
   <?php
   // Expense breakdown by category (for pie chart)
