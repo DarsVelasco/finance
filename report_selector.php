@@ -19,6 +19,7 @@ $currentMonth = date('n');
       align-items: center;
       justify-content: center;
       height: 100vh;
+      margin: 0;
     }
     .container {
       background: white;
@@ -26,23 +27,44 @@ $currentMonth = date('n');
       border-radius: 12px;
       box-shadow: 0 4px 10px rgba(0,0,0,0.1);
       text-align: center;
+      width: 420px;
+      max-width: 90%;
+    }
+    h2 {
+      margin-bottom: 20px;
     }
     select, button, a {
       padding: 10px;
-      margin: 10px;
+      margin: 8px 0;
       border-radius: 8px;
       border: 1px solid #ccc;
       font-size: 16px;
+      width: 100%;
+      box-sizing: border-box;
       text-decoration: none;
+    }
+    label {
+      font-weight: bold;
+      display: block;
+      margin-top: 10px;
+      margin-bottom: 5px;
+      text-align: left;
     }
     button {
       background-color: #2563eb;
       color: white;
       border: none;
       cursor: pointer;
+      transition: background-color 0.2s ease;
     }
     button:hover {
       background-color: #1d4ed8;
+    }
+    .csv-btn {
+      background-color: #16a34a;
+    }
+    .csv-btn:hover {
+      background-color: #15803d;
     }
     .back-btn {
       display: inline-block;
@@ -50,19 +72,30 @@ $currentMonth = date('n');
       color: white;
       border: none;
       cursor: pointer;
+      transition: background-color 0.2s ease;
+      width: 100%;
+      text-align: center;
     }
     .back-btn:hover {
       background-color: #4b5563;
+    }
+    .btn-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 15px;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h2>📊 Generate Finance Summary Report</h2>
+    <h2>📊 Finance Report Generator</h2>
 
-    <form action="generate_pdf.php" method="get">
+    <form method="GET" id="reportForm">
+      <!-- Month Selector -->
       <label for="month">Select Month:</label>
-      <select name="month" id="month" required>
+      <select name="month" id="month">
+        <option value="">All Months (Full Year)</option>
         <?php
         for ($m = 1; $m <= 12; $m++) {
           $monthName = date('F', mktime(0, 0, 0, $m, 1));
@@ -72,6 +105,7 @@ $currentMonth = date('n');
         ?>
       </select>
 
+      <!-- Year Selector -->
       <label for="year">Select Year:</label>
       <select name="year" id="year" required>
         <?php
@@ -82,8 +116,23 @@ $currentMonth = date('n');
         ?>
       </select>
 
-      <br>
-      <button type="submit">📥 Download Report</button>
+      <!-- Category Selector -->
+      <label for="category">Select Category:</label>
+      <select name="category" id="category">
+        <option value="">All Categories</option>
+        <option value="MANAGEMENT">MANAGEMENT</option>
+        <option value="ADMINISTRATION">ADMINISTRATION</option>
+        <option value="DISCIPLESHIP">DISCIPLESHIP</option>
+        <option value="WORSHIP">WORSHIP</option>
+        <option value="MINISTRY OF MINISTRIES">MINISTRY OF MINISTRIES</option>
+        <option value="FELLOWSHIP">FELLOWSHIP</option>
+        <option value="EVANGELISM">EVANGELISM</option>
+      </select>
+
+      <div class="btn-group">
+        <button type="submit" formaction="generate_pdf.php">📄 Download PDF Report</button>
+        <button type="submit" formaction="generate_csv.php" class="csv-btn">📥 Download CSV Report</button>
+      </div>
     </form>
 
     <!-- ✅ Back Button -->

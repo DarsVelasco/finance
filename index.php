@@ -49,7 +49,7 @@ include 'header.php';
   </div>
   <div class="text-center mb-4">
   <a href="report_selector.php" class="btn btn-outline-primary">
-    <i class="bi bi-file-earmark-pdf"></i> Download PDF Report
+    <i class="bi bi-file-earmark-pdf"></i> Download Report
   </a>
 </div>
 
