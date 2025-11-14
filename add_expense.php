@@ -6,13 +6,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $category_id = intval($_POST['category_id']);
     $description = $_POST['description'] ?? '';
     $amount = floatval($_POST['amount']);
-
+    
     // Ensure the sunday exists
     $stmt = $conn->prepare("INSERT IGNORE INTO sundays (sunday_date) VALUES (?)");
     $stmt->bind_param("s", $sunday_date);
     $stmt->execute();
     $stmt->close();
-
+    
     // Get the sunday_id
     $stmt = $conn->prepare("SELECT id FROM sundays WHERE sunday_date = ?");
     $stmt->bind_param("s", $sunday_date);
@@ -21,25 +21,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $sunday = $result->fetch_assoc();
     $sunday_id = $sunday['id'];
     $stmt->close();
-
+    
     // Insert expense entry
     $stmt = $conn->prepare("INSERT INTO expense_entries (sunday_id, category_id, description, amount) VALUES (?, ?, ?, ?)");
     $stmt->bind_param("iisd", $sunday_id, $category_id, $description, $amount);
-
-    // Build query string to preserve last date
-    $params = ['last_date=' . urlencode($sunday_date)];
-
+    
     if ($stmt->execute()) {
-        $params[] = 'success=1';
+        $stmt->close();
+        header("Location: expense.php?success=1&last_date=" . urlencode($sunday_date));
+        exit();
     } else {
-        $params[] = 'error=' . urlencode($stmt->error);
+        $error = $stmt->error;
+        $stmt->close();
+        header("Location: expense.php?error=" . urlencode($error) . "&last_date=" . urlencode($sunday_date));
+        exit();
     }
-
-    $stmt->close();
-    header("Location: expense.php?" . implode('&', $params));
-    exit();
 }
 
-// fallback redirect
 header("Location: expense.php");
-?>
