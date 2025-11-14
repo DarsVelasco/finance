@@ -24,13 +24,18 @@
 
 <h3 class="mb-4 text-center">JCLF - Income Tracking</h3>
 
+<?php
+// Keep last selected date (from URL) or default to today
+$last_date = $_GET['last_date'] ?? date('Y-m-d');
+?>
+
 <form method="POST" action="add_income.php" class="row g-3">
   <?php if (isset($_GET['filter_date']) && $_GET['filter_date'] != ''): ?>
     <input type="hidden" name="filter_date" value="<?php echo htmlspecialchars($_GET['filter_date']); ?>">
   <?php endif; ?>
   <div class="col-md-3">
     <label>Sunday Date</label>
-    <input type="date" name="sunday_date" class="form-control" required>
+    <input type="date" name="sunday_date" class="form-control" required value="<?= htmlspecialchars($last_date) ?>">
   </div>
   <div class="col-md-3">
     <label>Type</label>
@@ -77,26 +82,25 @@
   </thead>
   <tbody>
     <?php
-    // Build the query with filters
     $where_clauses = [];
     $params = [];
     $types = "";
-    
+
     if (isset($_GET['filter_date']) && $_GET['filter_date'] != '') {
       $where_clauses[] = "s.sunday_date = ?";
       $params[] = $_GET['filter_date'];
       $types .= "s";
     }
-    
+
     $where_sql = !empty($where_clauses) ? "WHERE " . implode(" AND ", $where_clauses) : "";
-    
+
     $sql = "SELECT i.id, s.sunday_date, i.income_type, i.description, i.amount
             FROM income_entries i
             JOIN sundays s ON s.id = i.sunday_id
             $where_sql
             ORDER BY s.sunday_date DESC
             LIMIT 100";
-    
+
     if (!empty($params)) {
       $stmt = $conn->prepare($sql);
       $stmt->bind_param($types, ...$params);
@@ -105,7 +109,7 @@
     } else {
       $res = $conn->query($sql);
     }
-    
+
     $total_amount = 0;
     $row_count = 0;
     while ($row = $res->fetch_assoc()) {
@@ -119,17 +123,17 @@
               <td>
                 <form method='POST' action='delete_income.php' style='display: inline;' onsubmit='return confirm(\"Are you sure you want to delete this income?\");'>
                   <input type='hidden' name='income_id' value='{$row['id']}'>";
-      
+
       if (isset($_GET['filter_date']) && $_GET['filter_date'] != '') {
         echo "<input type='hidden' name='filter_date' value='" . htmlspecialchars($_GET['filter_date']) . "'>";
       }
-      
+
       echo "                  <button type='submit' class='btn btn-danger btn-sm'>Delete</button>
                 </form>
               </td>
             </tr>";
     }
-    
+
     if ($row_count == 0) {
       echo "<tr><td colspan='5' class='text-center'>No income found.</td></tr>";
     } else {
@@ -138,5 +142,16 @@
     ?>
   </tbody>
 </table>
+
+<!-- Optional JS for persistent last date across page reloads -->
+<script>
+const dateInput = document.querySelector('input[name="sunday_date"]');
+if (sessionStorage.getItem('last_income_date')) {
+    dateInput.value = sessionStorage.getItem('last_income_date');
+}
+dateInput.addEventListener('change', () => {
+    sessionStorage.setItem('last_income_date', dateInput.value);
+});
+</script>
 
 <?php include 'footer.php'; ?>

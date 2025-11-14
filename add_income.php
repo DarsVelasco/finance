@@ -7,7 +7,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $description = $_POST['description'] ?? '';
     $amount = floatval($_POST['amount']);
     
-    // First, ensure the sunday exists
+    // Ensure the sunday exists
     $stmt = $conn->prepare("INSERT IGNORE INTO sundays (sunday_date) VALUES (?)");
     $stmt->bind_param("s", $sunday_date);
     $stmt->execute();
@@ -28,28 +28,24 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     
     if ($stmt->execute()) {
         $stmt->close();
-        // Preserve filter parameters
-        $params = [];
+        // Pass last_date to keep it after submission
+        $params = ['last_date=' . urlencode($sunday_date), 'success=1'];
         if (isset($_POST['filter_date']) && $_POST['filter_date'] != '') {
             $params[] = 'filter_date=' . urlencode($_POST['filter_date']);
         }
-        $query_string = !empty($params) ? '?' . implode('&', $params) . '&success=1' : '?success=1';
-        header("Location: income.php" . $query_string);
+        header("Location: income.php?" . implode('&', $params));
         exit();
     } else {
         $error = $stmt->error;
         $stmt->close();
-        // Preserve filter parameters on error too
-        $params = [];
+        $params = ['last_date=' . urlencode($sunday_date), 'error=' . urlencode($error)];
         if (isset($_POST['filter_date']) && $_POST['filter_date'] != '') {
             $params[] = 'filter_date=' . urlencode($_POST['filter_date']);
         }
-        $query_string = !empty($params) ? '?' . implode('&', $params) . '&error=' . urlencode($error) : '?error=' . urlencode($error);
-        header("Location: income.php" . $query_string);
+        header("Location: income.php?" . implode('&', $params));
         exit();
     }
 }
 
 header("Location: income.php");
 ?>
-

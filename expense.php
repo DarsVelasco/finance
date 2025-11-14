@@ -24,6 +24,11 @@
 
 <h3 class="mb-4 text-center">JCLF - Expense Tracking</h3>
 
+<?php
+// Keep last submitted date (from URL), or default to today
+$last_date = $_GET['last_date'] ?? date('Y-m-d');
+?>
+
 <form method="POST" action="add_expense.php" class="row g-3">
   <?php if (isset($_GET['filter_category']) && $_GET['filter_category'] != ''): ?>
     <input type="hidden" name="filter_category" value="<?php echo htmlspecialchars($_GET['filter_category']); ?>">
@@ -31,24 +36,23 @@
   <?php if (isset($_GET['filter_date']) && $_GET['filter_date'] != ''): ?>
     <input type="hidden" name="filter_date" value="<?php echo htmlspecialchars($_GET['filter_date']); ?>">
   <?php endif; ?>
+
   <div class="col-md-3">
     <label>Sunday Date</label>
-    <input type="date" name="sunday_date" class="form-control" required>
+    <input type="date" name="sunday_date" class="form-control" required value="<?= htmlspecialchars($last_date) ?>">
   </div>
   <div class="col-md-4">
     <label>Category</label>
     <select name="category_id" class="form-control" required>
         <?php
-        // Fetch all categories from the database
         $result = $conn->query("SELECT id, main_category FROM expense_categories ORDER BY main_category ASC");
         while ($row = $result->fetch_assoc()) {
-            // Preserve previously selected value after form submission
             $selected = (isset($_POST['category_id']) && $_POST['category_id'] == $row['id']) ? "selected" : "";
             echo "<option value='{$row['id']}' $selected>" . htmlspecialchars($row['main_category']) . "</option>";
         }
         ?>
     </select>
-</div>
+  </div>
   <div class="col-md-3">
     <label>Description</label>
     <input type="text" name="description" class="form-control">
@@ -108,6 +112,7 @@
     echo " on " . htmlspecialchars($_GET['filter_date']);
   }
 ?></h4>
+
 <table class="table table-bordered mt-3">
   <thead>
     <tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th>Action</th></tr>
@@ -189,5 +194,20 @@
     ?>
   </tbody>
 </table>
+
+<!-- Optional JS for persistent last date across page reloads -->
+<script>
+const dateInput = document.querySelector('input[name="sunday_date"]');
+
+// Load saved date from sessionStorage if available
+if (sessionStorage.getItem('last_expense_date')) {
+    dateInput.value = sessionStorage.getItem('last_expense_date');
+}
+
+// Save date to sessionStorage whenever it changes
+dateInput.addEventListener('change', () => {
+    sessionStorage.setItem('last_expense_date', dateInput.value);
+});
+</script>
 
 <?php include 'footer.php'; ?>
