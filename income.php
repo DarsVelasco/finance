@@ -1,5 +1,9 @@
-<?php include 'connection.php'; ?>
-<?php include 'header.php'; ?>
+<?php
+include 'connection.php';
+include 'header.php';
+?>
+
+<h3 class="mb-4 text-center">JCLF - Income Tracking</h3>
 
 <?php if (isset($_GET['success'])): ?>
 <div class="alert alert-success alert-dismissible fade show" role="alert">
@@ -22,13 +26,11 @@
 </div>
 <?php endif; ?>
 
-<h3 class="mb-4 text-center">JCLF - Income Tracking</h3>
-
 <?php
 $last_date = $_GET['last_date'] ?? date('Y-m-d');
 ?>
 
-<form method="POST" action="add_income.php" class="row g-3">
+<form method="POST" action="add_income.php" class="row g-3 mb-4">
   <div class="col-md-3">
     <label>Sunday Date</label>
     <input type="date" name="sunday_date" class="form-control" required value="<?= htmlspecialchars($last_date) ?>">
@@ -57,89 +59,123 @@ $last_date = $_GET['last_date'] ?? date('Y-m-d');
 
 <h4>Filter Income</h4>
 <form method="GET" class="row g-3 mb-4">
-  <div class="col-md-4">
-    <label>Filter by Date</label>
-    <input type="date" name="filter_date" class="form-control" value="<?php echo isset($_GET['filter_date']) ? htmlspecialchars($_GET['filter_date']) : ''; ?>">
+  <div class="col-md-3">
+    <label>View Type</label>
+    <select name="view_type" id="view_type" class="form-control" required>
+      <option value="single" <?php echo (!isset($_GET['view_type']) || $_GET['view_type']=='single') ? 'selected' : ''; ?>>Per Day</option>
+      <option value="monthly" <?php echo (isset($_GET['view_type']) && $_GET['view_type']=='monthly') ? 'selected' : ''; ?>>Per Month</option>
+      <option value="yearly" <?php echo (isset($_GET['view_type']) && $_GET['view_type']=='yearly') ? 'selected' : ''; ?>>Per Year</option>
+    </select>
   </div>
-  <div class="col-md-4 d-flex align-items-end">
-    <button type="submit" class="btn btn-primary me-2">Filter</button>
-    <a href="income.php" class="btn btn-secondary">Clear</a>
+  <div class="col-md-3" id="date_field">
+    <label>Select Date</label>
+    <input type="date" name="date" class="form-control" value="<?php echo isset($_GET['date']) ? htmlspecialchars($_GET['date']) : ''; ?>">
+  </div>
+  <div class="col-md-3" id="month_field" style="display:none;">
+    <label>Select Month</label>
+    <input type="month" name="month" class="form-control" value="<?php echo isset($_GET['month']) ? htmlspecialchars($_GET['month']) : ''; ?>">
+  </div>
+  <div class="col-md-3" id="year_field" style="display:none;">
+    <label>Select Year</label>
+    <select name="year" class="form-control">
+      <?php
+      $current_year = date('Y');
+      for($y=$current_year; $y>=$current_year-5; $y--){
+          $selected = (isset($_GET['year']) && $_GET['year']==$y) ? 'selected' : '';
+          echo "<option value='$y' $selected>$y</option>";
+      }
+      ?>
+    </select>
+  </div>
+  <div class="col-md-3 d-flex align-items-end">
+    <button type="submit" class="btn btn-primary">Filter</button>
+    <a href="income.php" class="btn btn-secondary ms-2">Clear</a>
   </div>
 </form>
 
-<h4>Income</h4>
-<table class="table table-bordered mt-3">
-  <thead>
-    <tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th><th>Action</th></tr>
-  </thead>
-  <tbody>
-<?php
-$filter_applied = isset($_GET['filter_date']) && $_GET['filter_date'] != '';
+<script>
+const viewSelect = document.getElementById('view_type');
+viewSelect.addEventListener('change', function(){
+    document.getElementById('date_field').style.display = this.value=='single'?'block':'none';
+    document.getElementById('month_field').style.display = this.value=='monthly'?'block':'none';
+    document.getElementById('year_field').style.display = this.value=='yearly'?'block':'none';
+});
+viewSelect.dispatchEvent(new Event('change'));
+</script>
 
-if ($filter_applied) {
-    $where_sql = "WHERE s.sunday_date = ?";
-    $params = [$_GET['filter_date']];
-    $types = "s";
-    $limit_sql = "LIMIT 100";
-} else {
-    $where_sql = "";
-    $params = [];
-    $types = "";
-    $limit_sql = "ORDER BY s.sunday_date DESC LIMIT 10";
+<h4>Income Records</h4>
+<table class="table table-bordered mt-3">
+<thead>
+<tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th><th>Action</th></tr>
+</thead>
+<tbody>
+<?php
+$where = [];
+$params = [];
+$types = "";
+
+if(isset($_GET['view_type'])){
+    $view = $_GET['view_type'];
+    if($view=='single' && !empty($_GET['date'])){
+        $where[] = "s.sunday_date=?";
+        $params[] = $_GET['date'];
+        $types .= "s";
+    }elseif($view=='monthly' && !empty($_GET['month'])){
+        $month = date('m', strtotime($_GET['month']."-01"));
+        $year = date('Y', strtotime($_GET['month']."-01"));
+        $where[] = "MONTH(s.sunday_date)=? AND YEAR(s.sunday_date)=?";
+        $params[] = $month;
+        $params[] = $year;
+        $types .= "ii";
+    }elseif($view=='yearly' && !empty($_GET['year'])){
+        $where[] = "YEAR(s.sunday_date)=?";
+        $params[] = $_GET['year'];
+        $types .= "i";
+    }
 }
 
+$where_sql = !empty($where) ? "WHERE ".implode(" AND ", $where) : "";
 $sql = "SELECT i.id, s.sunday_date, i.income_type, i.description, i.amount
         FROM income_entries i
-        JOIN sundays s ON s.id = i.sunday_id
+        JOIN sundays s ON s.id=i.sunday_id
         $where_sql
-        $limit_sql";
+        ORDER BY s.sunday_date DESC
+        LIMIT ".(empty($where)?10:100);
 
-if (!empty($params)) {
+if(!empty($params)){
     $stmt = $conn->prepare($sql);
     $stmt->bind_param($types, ...$params);
     $stmt->execute();
     $res = $stmt->get_result();
-} else {
+}else{
     $res = $conn->query($sql);
 }
 
-$total_amount = 0;
-$row_count = 0;
-while ($row = $res->fetch_assoc()) {
-    $row_count++;
-    $total_amount += $row['amount'];
+$total = 0;
+$count = 0;
+while($row = $res->fetch_assoc()){
+    $count++;
+    $total += $row['amount'];
     echo "<tr>
-            <td>{$row['sunday_date']}</td>
-            <td>{$row['income_type']}</td>
-            <td>{$row['description']}</td>
-            <td>₱" . number_format($row['amount'],2) . "</td>
-            <td>
-              <form method='POST' action='delete_income.php' onsubmit='return confirm(\"Are you sure?\");'>
-                <input type='hidden' name='income_id' value='{$row['id']}'>
-                <button type='submit' class='btn btn-danger btn-sm'>Delete</button>
-              </form>
-            </td>
-          </tr>";
+        <td>{$row['sunday_date']}</td>
+        <td>{$row['income_type']}</td>
+        <td>{$row['description']}</td>
+        <td>₱".number_format($row['amount'],2)."</td>
+        <td>
+            <form method='POST' action='delete_income.php' onsubmit='return confirm(\"Delete this income?\");'>
+            <input type='hidden' name='income_id' value='{$row['id']}'>
+            <button class='btn btn-danger btn-sm'>Delete</button>
+            </form>
+        </td>
+    </tr>";
 }
-
-if ($row_count == 0) {
+if($count==0){
     echo "<tr><td colspan='5' class='text-center'>No income found.</td></tr>";
-} else {
-    echo "<tr class='table-info'><td colspan='3'><strong>Total</strong></td><td><strong>₱" . number_format($total_amount,2) . "</strong></td><td></td></tr>";
+}else{
+    echo "<tr class='table-info'><td colspan='3'><strong>Total</strong></td><td><strong>₱".number_format($total,2)."</strong></td><td></td></tr>";
 }
 ?>
-  </tbody>
+</tbody>
 </table>
-
-<script>
-// Persist last date
-const dateInput = document.querySelector('input[name="sunday_date"]');
-if (sessionStorage.getItem('last_income_date')) {
-    dateInput.value = sessionStorage.getItem('last_income_date');
-}
-dateInput.addEventListener('change', () => {
-    sessionStorage.setItem('last_income_date', dateInput.value);
-});
-</script>
 
 <?php include 'footer.php'; ?>
