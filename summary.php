@@ -7,354 +7,398 @@ auth_require_login();
 
 <h3 class="mb-4 text-center">JCLF - Finance Summary</h3>
 
-<form method="GET" class="row g-3 mb-4">
-  <div class="col-md-3">
-    <label>View Type</label>
-    <select name="view_type" class="form-control" id="view_type" required>
-      <option value="single" <?php echo (!isset($_GET['view_type']) || $_GET['view_type'] == 'single') ? 'selected' : ''; ?>>Single Sunday</option>
-      <option value="weekly" <?php echo (isset($_GET['view_type']) && $_GET['view_type'] == 'weekly') ? 'selected' : ''; ?>>Weekly Summary (Up to Date)</option>
-      <option value="monthly" <?php echo (isset($_GET['view_type']) && $_GET['view_type'] == 'monthly') ? 'selected' : ''; ?>>Monthly Summary</option>
-      <option value="yearly" <?php echo (isset($_GET['view_type']) && $_GET['view_type'] == 'yearly') ? 'selected' : ''; ?>>Yearly Summary</option>
-    </select>
-  </div>
-  <div class="col-md-3" id="date_field">
-    <label>Select Sunday Date</label>
-    <input type="date" name="sunday_date" class="form-control" value="<?php echo isset($_GET['sunday_date']) ? htmlspecialchars($_GET['sunday_date']) : ''; ?>" required>
-  </div>
-  <div class="col-md-3" id="year_field" style="display: none;">
-    <label>Select Year</label>
-    <select name="year" class="form-control">
-      <?php
-      $current_year = date('Y');
-      for ($y = $current_year; $y >= $current_year - 5; $y--) {
-        $selected = (isset($_GET['year']) && $_GET['year'] == $y) ? 'selected' : '';
-        echo "<option value='$y' $selected>$y</option>";
-      }
-      ?>
-    </select>
-  </div>
-  <div class="col-md-3 d-flex align-items-end">
-    <button type="submit" class="btn btn-primary">View Summary</button>
+<?php
+// ============================================================
+// STEP 1: Read and normalize the request
+// ============================================================
+$view_type = $_GET['view_type'] ?? 'single';
+$date      = $_GET['sunday_date'] ?? date('Y-m-d');
+$year      = isset($_GET['year']) ? (int)$_GET['year'] : (int)date('Y');
+
+// ============================================================
+// STEP 2: Helpers — plain-English labels & period bounds
+// ============================================================
+
+/**
+ * Returns [start_date, end_date, period_label, mode_description]
+ * based on the selected view type.
+ */
+function resolve_period(string $view_type, string $date, int $year): array
+{
+    if ($view_type === 'yearly') {
+        $start = "$year-01-01";
+        $end   = "$year-12-31";
+        return [
+            $start,
+            $end,
+            "Year $year",
+            "Totals for the entire calendar year $year.",
+        ];
+    }
+
+    if ($view_type === 'monthly') {
+        $start = date('Y-m-01', strtotime($date));
+        $end   = date('Y-m-t', strtotime($date));
+        return [
+            $start,
+            $end,
+            date('F Y', strtotime($date)),
+            "Totals for the month of " . date('F Y', strtotime($date)) . ".",
+        ];
+    }
+
+    if ($view_type === 'weekly') {
+        $start = date('Y-01-01', strtotime($date));
+        $end   = $date;
+        return [
+            $start,
+            $end,
+            "Jan 1 – " . date('M j, Y', strtotime($date)),
+            "Running totals from the start of " . date('Y', strtotime($date)) . " up to " . date('M j, Y', strtotime($date)) . ".",
+        ];
+    }
+
+    // default: single
+    return [
+        $date,
+        $date,
+        date('F j, Y', strtotime($date)),
+        "Totals for the single Sunday of " . date('F j, Y', strtotime($date)) . ".",
+    ];
+}
+
+/**
+ * Returns the sum of (income - expense) for all sundays strictly
+ * BEFORE $start_date. This is the "carry-over" balance.
+ */
+function carry_over_before($conn, string $start_date): float
+{
+    $stmt = $conn->prepare("
+        SELECT
+            COALESCE((SELECT SUM(i.amount)
+                      FROM income_entries i
+                      JOIN sundays s ON s.id = i.sunday_id
+                      WHERE s.sunday_date < ?), 0)
+          - COALESCE((SELECT SUM(e.amount)
+                      FROM expense_entries e
+                      JOIN sundays s ON s.id = e.sunday_id
+                      WHERE s.sunday_date < ?), 0) AS cash
+    ");
+    $stmt->bind_param("ss", $start_date, $start_date);
+    $stmt->execute();
+    $row = db_stmt_fetch_one_assoc($stmt);
+    $stmt->close();
+    return (float)($row['cash'] ?? 0);
+}
+
+/**
+ * Returns [total_income, total_expense, category_breakdown, top_expenses]
+ * for the given period [start, end].
+ */
+function period_totals($conn, string $start, string $end): array
+{
+    // Income + expense totals
+    $stmt = $conn->prepare("
+        SELECT
+            COALESCE((SELECT SUM(i.amount)
+                      FROM income_entries i
+                      JOIN sundays s ON s.id = i.sunday_id
+                      WHERE s.sunday_date BETWEEN ? AND ?), 0) AS total_income,
+            COALESCE((SELECT SUM(e.amount)
+                      FROM expense_entries e
+                      JOIN sundays s ON s.id = e.sunday_id
+                      WHERE s.sunday_date BETWEEN ? AND ?), 0) AS total_expense
+    ");
+    $stmt->bind_param("ssss", $start, $end, $start, $end);
+    $stmt->execute();
+    $row = db_stmt_fetch_one_assoc($stmt);
+    $stmt->close();
+
+    // Category breakdown
+    $stmt = $conn->prepare("
+        SELECT c.main_category, SUM(e.amount) AS total, COUNT(e.id) AS items
+        FROM expense_entries e
+        JOIN expense_categories c ON c.id = e.category_id
+        JOIN sundays s ON s.id = e.sunday_id
+        WHERE s.sunday_date BETWEEN ? AND ?
+        GROUP BY c.main_category
+        ORDER BY total DESC
+    ");
+    $stmt->bind_param("ss", $start, $end);
+    $stmt->execute();
+    $cats = db_stmt_fetch_all_assoc($stmt);
+    $stmt->close();
+
+    // Top 5 individual expenses
+    $stmt = $conn->prepare("
+        SELECT s.sunday_date, c.main_category, e.description, e.amount
+        FROM expense_entries e
+        JOIN expense_categories c ON c.id = e.category_id
+        JOIN sundays s ON s.id = e.sunday_id
+        WHERE s.sunday_date BETWEEN ? AND ?
+        ORDER BY e.amount DESC
+        LIMIT 5
+    ");
+    $stmt->bind_param("ss", $start, $end);
+    $stmt->execute();
+    $top = db_stmt_fetch_all_assoc($stmt);
+    $stmt->close();
+
+    return [
+        (float)$row['total_income'],
+        (float)$row['total_expense'],
+        $cats,
+        $top,
+    ];
+}
+?>
+
+<!-- ============================================================ -->
+<!-- FILTER FORM                                                   -->
+<!-- ============================================================ -->
+<form method="GET" class="card shadow-sm mb-4">
+  <div class="card-body">
+    <div class="row g-3 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label small mb-1 fw-bold">View</label>
+        <select name="view_type" class="form-select" id="view_type">
+          <option value="single"  <?= $view_type==='single'?'selected':''  ?>>Single Sunday</option>
+          <option value="weekly"  <?= $view_type==='weekly'?'selected':''  ?>>Year-to-Date (weekly running total)</option>
+          <option value="monthly" <?= $view_type==='monthly'?'selected':'' ?>>Monthly</option>
+          <option value="yearly"  <?= $view_type==='yearly'?'selected':''  ?>>Yearly</option>
+        </select>
+      </div>
+
+      <div class="col-md-3" id="date_field" style="<?= $view_type==='yearly'?'display:none':'' ?>">
+        <label class="form-label small mb-1 fw-bold">Pick a date</label>
+        <input type="date" name="sunday_date" class="form-control"
+               value="<?= htmlspecialchars($date) ?>">
+        <div class="form-text">
+          <?= $view_type==='monthly' ? 'Any date in the month you want.' : ($view_type==='weekly' ? 'Cut-off Sunday.' : 'The specific Sunday.') ?>
+        </div>
+      </div>
+
+      <div class="col-md-3" id="year_field" style="<?= $view_type==='yearly'?'':'display:none' ?>">
+        <label class="form-label small mb-1 fw-bold">Year</label>
+        <select name="year" class="form-select">
+          <?php for ($y = (int)date('Y'); $y >= (int)date('Y') - 5; $y--): ?>
+            <option value="<?= $y ?>" <?= $year===$y?'selected':'' ?>><?= $y ?></option>
+          <?php endfor; ?>
+        </select>
+      </div>
+
+      <div class="col-md-3">
+        <button type="submit" class="btn btn-primary w-100">View Summary</button>
+      </div>
+    </div>
   </div>
 </form>
 
 <script>
-document.getElementById('view_type').addEventListener('change', function() {
-  const viewType = this.value;
-  const dateField = document.getElementById('date_field');
-  const yearField = document.getElementById('year_field');
-  
-  if (viewType === 'yearly') {
-    dateField.style.display = 'none';
-    dateField.querySelector('input').removeAttribute('required');
-    yearField.style.display = 'block';
-  } else {
-    dateField.style.display = 'block';
-    dateField.querySelector('input').setAttribute('required', 'required');
-    yearField.style.display = 'none';
-  }
+document.getElementById('view_type').addEventListener('change', function () {
+  const v = this.value;
+  document.getElementById('date_field').style.display = (v === 'yearly') ? 'none' : '';
+  document.getElementById('year_field').style.display = (v === 'yearly') ? '' : 'none';
 });
-// Trigger on page load
-document.getElementById('view_type').dispatchEvent(new Event('change'));
 </script>
 
 <?php
-if (isset($_GET['sunday_date']) || (isset($_GET['view_type']) && $_GET['view_type'] == 'yearly' && isset($_GET['year']))) {
-    $view_type = isset($_GET['view_type']) ? $_GET['view_type'] : 'single';
+// ============================================================
+// STEP 3: Only compute if a view was actually requested
+// ============================================================
+if (isset($_GET['view_type']) || isset($_GET['sunday_date'])):
 
-    $previous_cash_on_hand = 0;
-    $previous_year_balance = 0;
-    $is_previous_year = false;
+    [$start, $end, $period_label, $mode_description] = resolve_period($view_type, $date, $year);
+    $carry_over = carry_over_before($conn, $start);
 
-    if ($view_type == 'yearly') {
-        $year = isset($_GET['year']) ? intval($_GET['year']) : date('Y');
-        $year_start = "$year-01-01";
-        $year_end = "$year-12-31";
+    [$total_income, $total_expense, $cat_breakdown, $top_expenses] = period_totals($conn, $start, $end);
+    $net = $total_income - $total_expense;
+    $cash_on_hand = $carry_over + $net;
 
-        // Previous year's ending balance
-        $prev_year_end = ($year - 1) . "-12-31";
-        $stmt = $conn->prepare("
-            SELECT 
-                COALESCE((SELECT SUM(amount) FROM income_entries i 
-                          INNER JOIN sundays s ON s.id = i.sunday_id 
-                          WHERE s.sunday_date <= ?), 0) -
-                COALESCE((SELECT SUM(amount) FROM expense_entries e 
-                          INNER JOIN sundays s ON s.id = e.sunday_id 
-                          WHERE s.sunday_date <= ?), 0) AS cash_on_hand
-        ");
-        $stmt->bind_param("ss", $prev_year_end, $prev_year_end);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $prev_row = $result->fetch_assoc();
-        $previous_year_balance = $prev_row['cash_on_hand'];
-        $stmt->close();
-
-        // Current year totals
-        $sql = "
-            SELECT 
-                COALESCE((SELECT SUM(amount) FROM income_entries i 
-                          INNER JOIN sundays s ON s.id = i.sunday_id 
-                          WHERE s.sunday_date >= ? AND s.sunday_date <= ?), 0) AS total_income,
-                COALESCE((SELECT SUM(amount) FROM expense_entries e 
-                          INNER JOIN sundays s ON s.id = e.sunday_id 
-                          WHERE s.sunday_date >= ? AND s.sunday_date <= ?), 0) AS total_expense
-        ";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("ssss", $year_start, $year_end, $year_start, $year_end);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $row = $result->fetch_assoc();
-        $stmt->close();
-
-        $period_label = "Yearly Summary ($year)";
-
-        $current_period_cash = $row['total_income'] - $row['total_expense'];
-        $row['cash_on_hand'] = $current_period_cash; // ONLY current year
-        $row['previous_cash'] = $previous_year_balance; // previous year separate
-
-    } else {
-        // Other views: single, weekly, monthly
-        $date = $_GET['sunday_date'];
-        $current_year = date('Y', strtotime($date));
-        $year_start = "$current_year-01-01";
-
-        if ($view_type == 'weekly') {
-            // Weekly up to date
-            $stmt = $conn->prepare("
-                SELECT 
-                    COALESCE((SELECT SUM(amount) FROM income_entries i 
-                              INNER JOIN sundays s ON s.id = i.sunday_id 
-                              WHERE s.sunday_date < ? AND s.sunday_date >= ?), 0) -
-                    COALESCE((SELECT SUM(amount) FROM expense_entries e 
-                              INNER JOIN sundays s ON s.id = e.sunday_id 
-                              WHERE s.sunday_date < ? AND s.sunday_date >= ?), 0) AS cash_on_hand
-            ");
-            $stmt->bind_param("ssss", $date, $year_start, $date, $year_start);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $prev_row = $result->fetch_assoc();
-            $previous_cash_on_hand = $prev_row['cash_on_hand'];
-            $stmt->close();
-
-            // Previous year ending balance
-            $prev_year_end = ($current_year - 1) . "-12-31";
-            $stmt = $conn->prepare("
-                SELECT 
-                    COALESCE((SELECT SUM(amount) FROM income_entries i 
-                              INNER JOIN sundays s ON s.id = i.sunday_id 
-                              WHERE s.sunday_date <= ?), 0) -
-                    COALESCE((SELECT SUM(amount) FROM expense_entries e 
-                              INNER JOIN sundays s ON s.id = e.sunday_id 
-                              WHERE s.sunday_date <= ?), 0) AS cash_on_hand
-            ");
-            $stmt->bind_param("ss", $prev_year_end, $prev_year_end);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $prev_year_row = $result->fetch_assoc();
-            $previous_year_balance = $prev_year_row['cash_on_hand'];
-            $stmt->close();
-
-            if ($previous_year_balance > 0) {
-                $previous_cash_on_hand += $previous_year_balance;
-                $is_previous_year = true;
-            }
-
-            $sql = "
-                SELECT 
-                    COALESCE((SELECT SUM(amount) FROM income_entries i 
-                              INNER JOIN sundays s ON s.id = i.sunday_id 
-                              WHERE s.sunday_date <= ? AND s.sunday_date >= ?), 0) AS total_income,
-                    COALESCE((SELECT SUM(amount) FROM expense_entries e 
-                              INNER JOIN sundays s ON s.id = e.sunday_id 
-                              WHERE s.sunday_date <= ? AND s.sunday_date >= ?), 0) AS total_expense
-            ";
-            $stmt = $conn->prepare($sql);
-            $stmt->bind_param("ssss", $date, $year_start, $date, $year_start);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $row = $result->fetch_assoc();
-            $stmt->close();
-
-            $period_label = "Weekly Summary (Up to " . date('F d, Y', strtotime($date)) . ")";
-
-        } elseif ($view_type == 'monthly') {
-            $month_start = date('Y-m-01', strtotime($date));
-            $month_end = date('Y-m-t', strtotime($date));
-            $month_year = date('Y', strtotime($date));
-
-            // Previous month cash
-            $prev_month_end = date('Y-m-t', strtotime($month_start . ' -1 month'));
-            $prev_month_year = date('Y', strtotime($prev_month_end));
-            if ($prev_month_year == $month_year) {
-                $stmt = $conn->prepare("
-                    SELECT 
-                        COALESCE((SELECT SUM(amount) FROM income_entries i 
-                                  INNER JOIN sundays s ON s.id = i.sunday_id 
-                                  WHERE s.sunday_date <= ? AND s.sunday_date >= ?), 0) -
-                        COALESCE((SELECT SUM(amount) FROM expense_entries e 
-                                  INNER JOIN sundays s ON s.id = e.sunday_id 
-                                  WHERE s.sunday_date <= ? AND s.sunday_date >= ?), 0) AS cash_on_hand
-                ");
-                $year_start_month = "$month_year-01-01";
-                $stmt->bind_param("ssss", $prev_month_end, $year_start_month, $prev_month_end, $year_start_month);
-                $stmt->execute();
-                $result = $stmt->get_result();
-                $prev_row = $result->fetch_assoc();
-                $previous_cash_on_hand = $prev_row['cash_on_hand'];
-                $stmt->close();
-            }
-
-            // Previous year balance if January
-            if ($month_year > date('Y', strtotime($prev_month_end))) {
-                $prev_year_end = ($month_year - 1) . "-12-31";
-                $stmt = $conn->prepare("
-                    SELECT 
-                        COALESCE((SELECT SUM(amount) FROM income_entries i 
-                                  INNER JOIN sundays s ON s.id = i.sunday_id 
-                                  WHERE s.sunday_date <= ?), 0) -
-                        COALESCE((SELECT SUM(amount) FROM expense_entries e 
-                                  INNER JOIN sundays s ON s.id = e.sunday_id 
-                                  WHERE s.sunday_date <= ?), 0) AS cash_on_hand
-                ");
-                $stmt->bind_param("ss", $prev_year_end, $prev_year_end);
-                $stmt->execute();
-                $result = $stmt->get_result();
-                $prev_year_row = $result->fetch_assoc();
-                $previous_year_balance = $prev_year_row['cash_on_hand'];
-                $stmt->close();
-
-                if ($previous_year_balance > 0) {
-                    $previous_cash_on_hand += $previous_year_balance;
-                    $is_previous_year = true;
-                }
-            }
-
-            $sql = "
-                SELECT 
-                    COALESCE((SELECT SUM(amount) FROM income_entries i 
-                              INNER JOIN sundays s ON s.id = i.sunday_id 
-                              WHERE s.sunday_date >= ? AND s.sunday_date <= ?), 0) AS total_income,
-                    COALESCE((SELECT SUM(amount) FROM expense_entries e 
-                              INNER JOIN sundays s ON s.id = e.sunday_id 
-                              WHERE s.sunday_date >= ? AND s.sunday_date <= ?), 0) AS total_expense
-            ";
-            $stmt = $conn->prepare($sql);
-            $stmt->bind_param("ssss", $month_start, $month_end, $month_start, $month_end);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $row = $result->fetch_assoc();
-            $stmt->close();
-
-            $period_label = "Monthly Summary (" . date('F Y', strtotime($date)) . ")";
-
-        } else {
-            // Single Sunday
-            $sql = "
-                SELECT 
-                    COALESCE((SELECT SUM(amount) FROM income_entries i 
-                              INNER JOIN sundays s ON s.id = i.sunday_id 
-                              WHERE s.sunday_date = ?), 0) AS total_income,
-                    COALESCE((SELECT SUM(amount) FROM expense_entries e 
-                              INNER JOIN sundays s ON s.id = e.sunday_id 
-                              WHERE s.sunday_date = ?), 0) AS total_expense
-            ";
-            $stmt = $conn->prepare($sql);
-            $stmt->bind_param("ss", $date, $date);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $row = $result->fetch_assoc();
-            $stmt->close();
-
-            // Previous Sunday's cash
-            $stmt = $conn->prepare("
-                SELECT 
-                    COALESCE((SELECT SUM(amount) FROM income_entries i 
-                              INNER JOIN sundays s ON s.id = i.sunday_id 
-                              WHERE s.sunday_date < ? AND s.sunday_date >= ?), 0) -
-                    COALESCE((SELECT SUM(amount) FROM expense_entries e 
-                              INNER JOIN sundays s ON s.id = e.sunday_id 
-                              WHERE s.sunday_date < ? AND s.sunday_date >= ?), 0) AS cash_on_hand
-            ");
-            $stmt->bind_param("ssss", $date, $year_start, $date, $year_start);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $prev_row = $result->fetch_assoc();
-            $previous_cash_on_hand = $prev_row['cash_on_hand'];
-            $stmt->close();
-
-            // Previous year balance
-            $prev_year_end = ($current_year - 1) . "-12-31";
-            $stmt = $conn->prepare("
-                SELECT 
-                    COALESCE((SELECT SUM(amount) FROM income_entries i 
-                              INNER JOIN sundays s ON s.id = i.sunday_id 
-                              WHERE s.sunday_date <= ?), 0) -
-                    COALESCE((SELECT SUM(amount) FROM expense_entries e 
-                              INNER JOIN sundays s ON s.id = e.sunday_id 
-                              WHERE s.sunday_date <= ?), 0) AS cash_on_hand
-            ");
-            $stmt->bind_param("ss", $prev_year_end, $prev_year_end);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $prev_year_row = $result->fetch_assoc();
-            $previous_year_balance = $prev_year_row['cash_on_hand'];
-            $stmt->close();
-
-            if ($previous_year_balance > 0) {
-                $previous_cash_on_hand += $previous_year_balance;
-                $is_previous_year = true;
-            }
-
-            $period_label = "Summary for " . date('F d, Y', strtotime($date));
-        }
-
-        $current_period_cash = $row['total_income'] - $row['total_expense'];
-        $row['cash_on_hand'] = $previous_cash_on_hand + $current_period_cash;
-        $row['previous_cash'] = $previous_cash_on_hand;
+    // Format labels
+    $period_display = date('M j, Y', strtotime($start));
+    if ($start !== $end) {
+        $period_display .= ' – ' . date('M j, Y', strtotime($end));
     }
 ?>
 
-<div class="mb-3">
-    <h4 class="text-center"><?php echo $period_label; ?></h4>
-    <?php if ($view_type == 'yearly' && $previous_year_balance > 0): ?>
-        <p class="text-center text-warning"><strong>Previous Year Balance: ₱<?php echo number_format($previous_year_balance, 2); ?></strong></p>
-    <?php elseif ($previous_cash_on_hand > 0): ?>
-        <p class="text-center text-muted">Carry-over from previous period: ₱<?php echo number_format($previous_cash_on_hand, 2); ?></p>
+<!-- ============================================================ -->
+<!-- PERIOD CONTEXT BANNER                                         -->
+<!-- ============================================================ -->
+<div class="alert alert-info d-flex align-items-start gap-3 mb-4">
+  <div class="fs-3">ℹ️</div>
+  <div>
+    <div class="fw-bold"><?= htmlspecialchars($period_label) ?></div>
+    <div class="small"><?= htmlspecialchars($mode_description) ?></div>
+    <div class="small text-muted mt-1">
+      Included dates: <strong><?= htmlspecialchars($period_display) ?></strong>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 4 SUMMARY CARDS                                              -->
+<!-- ============================================================ -->
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="card border-success shadow-sm h-100">
+      <div class="card-body text-center">
+        <div class="text-success small fw-bold text-uppercase">Income</div>
+        <div class="display-6 fw-bold text-success">₱<?= number_format($total_income, 2) ?></div>
+        <div class="text-muted small">Money received this period</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-3">
+    <div class="card border-danger shadow-sm h-100">
+      <div class="card-body text-center">
+        <div class="text-danger small fw-bold text-uppercase">Expenses</div>
+        <div class="display-6 fw-bold text-danger">₱<?= number_format($total_expense, 2) ?></div>
+        <div class="text-muted small">Money spent this period</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-3">
+    <div class="card border-<?= $net >= 0 ? 'primary' : 'warning' ?> shadow-sm h-100">
+      <div class="card-body text-center">
+        <div class="small fw-bold text-uppercase text-<?= $net >= 0 ? 'primary' : 'warning' ?>">Net Change</div>
+        <div class="display-6 fw-bold text-<?= $net >= 0 ? 'primary' : 'warning' ?>">
+          ₱<?= number_format($net, 2) ?>
+        </div>
+        <div class="text-muted small">Income − Expenses</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-3">
+    <div class="card bg-dark text-white shadow-sm h-100">
+      <div class="card-body text-center">
+        <div class="small fw-bold text-uppercase opacity-75">Cash on Hand</div>
+        <div class="display-6 fw-bold">₱<?= number_format($cash_on_hand, 2) ?></div>
+        <div class="small opacity-75 mt-1">
+          <?php if ($carry_over != 0): ?>
+            ₱<?= number_format($carry_over, 2) ?> carry-over
+            + ₱<?= number_format($net, 2) ?> net
+          <?php else: ?>
+            = Net change (no prior balance)
+          <?php endif; ?>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- THE MATH — EXPLAINED                                         -->
+<!-- ============================================================ -->
+<div class="card shadow-sm mb-4">
+  <div class="card-header bg-light fw-bold">How "Cash on Hand" is calculated</div>
+  <div class="card-body">
+    <table class="table table-sm mb-0">
+      <tbody>
+        <tr>
+          <td>Carry-over from before <?= htmlspecialchars($period_display) ?></td>
+          <td class="text-end">₱<?= number_format($carry_over, 2) ?></td>
+        </tr>
+        <tr>
+          <td>+ Net change this period (income − expenses)</td>
+          <td class="text-end">₱<?= number_format($net, 2) ?></td>
+        </tr>
+        <tr class="table-dark">
+          <th>= Cash on Hand</th>
+          <th class="text-end">₱<?= number_format($cash_on_hand, 2) ?></th>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- CATEGORY BREAKDOWN                                           -->
+<!-- ============================================================ -->
+<div class="card shadow-sm mb-4">
+  <div class="card-header bg-light fw-bold d-flex justify-content-between">
+    <span>Expenses by Category</span>
+    <span class="text-muted small fw-normal"><?= count($cat_breakdown) ?> categories · ₱<?= number_format($total_expense, 2) ?> total</span>
+  </div>
+  <div class="card-body p-0">
+    <?php if (empty($cat_breakdown)): ?>
+      <div class="text-center text-muted py-4">No expenses recorded for this period.</div>
+    <?php else: ?>
+      <table class="table table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Category</th>
+            <th class="text-center" style="width: 90px;">Items</th>
+            <th style="width: 45%;">Share</th>
+            <th class="text-end" style="width: 160px;">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php foreach ($cat_breakdown as $c):
+            $amt = (float)$c['total'];
+            $pct = $total_expense > 0 ? ($amt / $total_expense) * 100 : 0;
+          ?>
+          <tr>
+            <td><strong><?= htmlspecialchars($c['main_category']) ?></strong></td>
+            <td class="text-center"><?= (int)$c['items'] ?></td>
+            <td>
+              <div class="progress" style="height: 20px;">
+                <div class="progress-bar bg-danger" style="width: <?= number_format($pct, 1) ?>%;">
+                  <?= $pct >= 12 ? number_format($pct, 0) . '%' : '' ?>
+                </div>
+              </div>
+            </td>
+            <td class="text-end">₱<?= number_format($amt, 2) ?></td>
+          </tr>
+          <?php endforeach; ?>
+        </tbody>
+        <tfoot class="table-secondary">
+          <tr>
+            <th>TOTAL</th>
+            <th class="text-center"><?= array_sum(array_column($cat_breakdown, 'items')) ?></th>
+            <th></th>
+            <th class="text-end">₱<?= number_format($total_expense, 2) ?></th>
+          </tr>
+        </tfoot>
+      </table>
     <?php endif; ?>
+  </div>
 </div>
 
-<div class="row text-center">
-    <div class="col-md-4">
-        <div class="card bg-success text-white">
-            <div class="card-body">
-                <h5>Total Income</h5>
-                <h3>₱<?php echo number_format($row['total_income'], 2); ?></h3>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-4">
-        <div class="card bg-danger text-white">
-            <div class="card-body">
-                <h5>Total Expenses</h5>
-                <h3>₱<?php echo number_format($row['total_expense'], 2); ?></h3>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-4">
-        <div class="card bg-primary text-white">
-            <div class="card-body">
-                <h5>Cash on Hand</h5>
-                <h3>₱<?php echo number_format($row['cash_on_hand'], 2); ?></h3>
-                <?php if ($view_type != 'yearly' && $previous_cash_on_hand > 0): ?>
-                    <small>(₱<?php echo number_format($previous_cash_on_hand, 2); ?> carry-over + ₱<?php echo number_format($current_period_cash, 2); ?> current)</small>
-                <?php elseif ($view_type == 'yearly' && $previous_year_balance > 0): ?>
-                    <small>(Current Year: ₱<?php echo number_format($current_period_cash, 2); ?>)</small>
-                <?php endif; ?>
-            </div>
-        </div>
-    </div>
+<!-- ============================================================ -->
+<!-- TOP 5 EXPENSES                                               -->
+<!-- ============================================================ -->
+<?php if (!empty($top_expenses)): ?>
+<div class="card shadow-sm mb-4">
+  <div class="card-header bg-light fw-bold">Top 5 Expenses This Period</div>
+  <div class="card-body p-0">
+    <table class="table table-sm mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Date</th>
+          <th>Category</th>
+          <th>Description</th>
+          <th class="text-end">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php foreach ($top_expenses as $t): ?>
+        <tr>
+          <td><?= htmlspecialchars($t['sunday_date']) ?></td>
+          <td><?= htmlspecialchars($t['main_category']) ?></td>
+          <td><?= htmlspecialchars($t['description'] ?: '—') ?></td>
+          <td class="text-end">₱<?= number_format($t['amount'], 2) ?></td>
+        </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
 </div>
+<?php endif; ?>
 
-<?php } ?>
+<?php endif; // end if view requested ?>
 
 <?php include 'footer.php'; ?>

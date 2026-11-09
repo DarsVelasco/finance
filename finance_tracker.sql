@@ -179,3 +179,46 @@ COMMIT;
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
 /*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+
+-- Run once via phpMyAdmin or mysql CLI
+
+CREATE TABLE IF NOT EXISTS donation_categories (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  main_category VARCHAR(100) NOT NULL UNIQUE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO donation_categories (main_category) VALUES
+('MISSIONS'),
+('OUTREACH'),
+('CHARITY'),
+('BENEVOLENCE'),
+('CHURCH PLANTING'),
+('OTHER DONATION EXPENSE');
+
+CREATE TABLE IF NOT EXISTS donation_income_entries (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  sunday_id INT NOT NULL,
+  donation_type VARCHAR(100) NOT NULL,
+  donor VARCHAR(150) DEFAULT NULL,
+  description VARCHAR(255) DEFAULT NULL,
+  amount DECIMAL(12,2) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_sunday_id (sunday_id),
+  CONSTRAINT donation_income_sunday_fk FOREIGN KEY (sunday_id)
+    REFERENCES sundays(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS donation_expense_entries (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  sunday_id INT NOT NULL,
+  category_id INT NOT NULL,
+  description VARCHAR(255) DEFAULT NULL,
+  amount DECIMAL(12,2) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_sunday_id (sunday_id),
+  KEY idx_category_id (category_id),
+  CONSTRAINT donation_expense_sunday_fk FOREIGN KEY (sunday_id)
+    REFERENCES sundays(id) ON DELETE CASCADE,
+  CONSTRAINT donation_expense_cat_fk FOREIGN KEY (category_id)
+    REFERENCES donation_categories(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

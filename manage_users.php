@@ -10,10 +10,15 @@ $me = auth_user();
 $error = '';
 $success = '';
 
-function count_admins(mysqli $conn): int
+function count_admins($conn): int
 {
+    if (!$conn instanceof mysqli) {
+        return 0;
+    }
     $res = $conn->query("SELECT COUNT(*) AS c FROM users WHERE role='admin'");
-    if (!$res) return 0;
+    if (!$res) {
+        return 0;
+    }
     $row = $res->fetch_assoc();
     return (int)($row['c'] ?? 0);
 }
@@ -34,8 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $conn->prepare('SELECT id, username, role FROM users WHERE id = ? LIMIT 1');
             $stmt->bind_param('i', $userId);
             $stmt->execute();
-            $res = $stmt->get_result();
-            $target = $res ? $res->fetch_assoc() : null;
+            $target = db_stmt_fetch_one_assoc($stmt);
             $stmt->close();
 
             if (!$target) {

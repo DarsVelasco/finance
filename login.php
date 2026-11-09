@@ -18,7 +18,6 @@ $next = $_GET['next'] ?? ($_POST['next'] ?? 'index.php');
 if (!is_string($next) || $next === '') {
     $next = 'index.php';
 }
-// Avoid open redirects: only allow relative paths.
 if (str_starts_with($next, 'http://') || str_starts_with($next, 'https://') || str_starts_with($next, '//')) {
     $next = 'index.php';
 }
@@ -34,8 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($stmt) {
             $stmt->bind_param('s', $username);
             $stmt->execute();
-            $res = $stmt->get_result();
-            $user = $res ? $res->fetch_assoc() : null;
+            $user = db_stmt_fetch_one_assoc($stmt);
             $stmt->close();
 
             if ($user && password_verify($password, (string)$user['password_hash'])) {
@@ -43,8 +41,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 header('Location: ' . $next);
                 exit();
             }
+            $error = 'Invalid username or password.';
+        } else {
+            $error = 'Login unavailable. Check database.';
         }
-        $error = 'Invalid username or password.';
     }
 }
 ?>
@@ -75,17 +75,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <form method="POST" class="vstack gap-3">
           <input type="hidden" name="next" value="<?= htmlspecialchars($next) ?>">
-
           <div>
             <label class="form-label">Username</label>
             <input name="username" class="form-control" autocomplete="username" required>
           </div>
-
           <div>
             <label class="form-label">Password</label>
             <input type="password" name="password" class="form-control" autocomplete="current-password" required>
           </div>
-
           <button class="btn btn-primary w-100">Login</button>
         </form>
 
@@ -99,4 +96,3 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
-

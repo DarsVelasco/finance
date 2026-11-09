@@ -111,3 +111,29 @@ function auth_csrf_validate(?string $token): bool
     return hash_equals($_SESSION['csrf_token'], $token);
 }
 
+/** Verify the logged-in user's password (e.g. admin confirming an edit). */
+function auth_verify_current_password($conn, string $password): bool
+{
+    if (!$conn instanceof mysqli) {
+        return false;
+    }
+    $u = auth_user();
+    if ($u === null || $password === '') {
+        return false;
+    }
+    $stmt = $conn->prepare('SELECT password_hash FROM users WHERE id = ? LIMIT 1');
+    if (!$stmt) {
+        return false;
+    }
+    $uid = (int)$u['id'];
+    $stmt->bind_param('i', $uid);
+    $stmt->execute();
+    $row = db_stmt_fetch_one_assoc($stmt);
+    $stmt->close();
+    $hash = $row['password_hash'] ?? null;
+    if (!$hash || !is_string($hash)) {
+        return false;
+    }
+    return password_verify($password, $hash);
+}
+

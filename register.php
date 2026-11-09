@@ -31,15 +31,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Passwords do not match.';
     } else {
         $hash = password_hash($password, PASSWORD_DEFAULT);
-        $role = 'viewer'; // registrations are viewers by default
-
-        $stmt = $conn->prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)');
+        $role = 'viewer';
+        $stmt = $conn->prepare('INSERT INTO users (username, password_hash, role, is_email_verified) VALUES (?, ?, ?, 1)');
         if (!$stmt) {
-            $error = 'Unable to create account right now.';
+            $error = 'Unable to create account.';
         } else {
             $stmt->bind_param('sss', $username, $hash, $role);
             if ($stmt->execute()) {
-                $success = 'Account created. You can now login.';
+                $success = 'Account created. You can now log in.';
             } else {
                 if (str_contains(strtolower((string)$stmt->error), 'duplicate')) {
                     $error = 'Username already exists.';
@@ -65,13 +64,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <main class="container py-5" style="max-width: 560px;">
     <div class="card shadow-sm">
       <div class="card-body p-4">
-        <div class="d-flex align-items-center gap-2 mb-3">
-          <img src="logo.png" alt="Logo" width="40" height="40">
-          <div>
-            <h4 class="mb-0">Create account</h4>
-            <small class="text-muted">New accounts are <strong>viewer</strong> by default</small>
-          </div>
-        </div>
+        <h4 class="mb-3">Create account</h4>
+        <p class="text-muted small">New accounts are <strong>viewer</strong> by default.</p>
 
         <?php if ($error !== ''): ?>
           <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
@@ -87,19 +81,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           <div>
             <label class="form-label">Username</label>
             <input name="username" class="form-control" required>
-            <div class="form-text">3-20 chars, letters/numbers/underscore only.</div>
           </div>
-
           <div>
             <label class="form-label">Password</label>
             <input type="password" name="password" class="form-control" required>
           </div>
-
           <div>
             <label class="form-label">Confirm password</label>
             <input type="password" name="confirm_password" class="form-control" required>
           </div>
-
           <button class="btn btn-primary w-100">Register</button>
           <a class="btn btn-link" href="login.php">Already have an account? Login</a>
         </form>
@@ -109,4 +99,3 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
-

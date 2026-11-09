@@ -32,10 +32,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $uid = (int)$user['id'];
             $stmt->bind_param('i', $uid);
-            $stmt->execute();
-            $res = $stmt->get_result();
-            $row = $res ? $res->fetch_assoc() : null;
-            $stmt->close();
+                $stmt->execute();
+                $row = db_stmt_fetch_one_assoc($stmt);
+                $stmt->close();
 
             $hash = $row['password_hash'] ?? null;
             if (!$hash || !password_verify($current, (string)$hash)) {

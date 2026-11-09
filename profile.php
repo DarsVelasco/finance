@@ -30,8 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $uid = (int)$user['id'];
                 $stmt->bind_param('i', $uid);
                 $stmt->execute();
-                $res = $stmt->get_result();
-                $row = $res ? $res->fetch_assoc() : null;
+                $row = db_stmt_fetch_one_assoc($stmt);
                 $stmt->close();
 
                 $hash = $row['password_hash'] ?? null;

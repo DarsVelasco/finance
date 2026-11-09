@@ -17,10 +17,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $stmt = $conn->prepare("SELECT id FROM sundays WHERE sunday_date = ?");
     $stmt->bind_param("s", $sunday_date);
     $stmt->execute();
-    $result = $stmt->get_result();
-    $sunday_id = $result->fetch_assoc()['id'];
+    $row = db_stmt_fetch_one_assoc($stmt);
     $stmt->close();
-    
+    $sunday_id = (int)($row['id'] ?? 0);
+    if ($sunday_id <= 0) {
+        header("Location: income.php?error=" . urlencode('Could not resolve Sunday date.'));
+        exit();
+    }
+
     $stmt = $conn->prepare("INSERT INTO income_entries (sunday_id, income_type, description, amount) VALUES (?, ?, ?, ?)");
     $stmt->bind_param("issd", $sunday_id, $income_type, $description, $amount);
     

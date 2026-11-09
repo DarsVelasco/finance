@@ -19,11 +19,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $stmt = $conn->prepare("SELECT id FROM sundays WHERE sunday_date = ?");
     $stmt->bind_param("s", $sunday_date);
     $stmt->execute();
-    $result = $stmt->get_result();
-    $sunday = $result->fetch_assoc();
-    $sunday_id = $sunday['id'];
+    $sunday = db_stmt_fetch_one_assoc($stmt);
     $stmt->close();
-    
+    $sunday_id = (int)($sunday['id'] ?? 0);
+    if ($sunday_id <= 0) {
+        header("Location: expense.php?error=" . urlencode('Could not resolve Sunday date.'));
+        exit();
+    }
+
     // Insert expense entry
     $stmt = $conn->prepare("INSERT INTO expense_entries (sunday_id, category_id, description, amount) VALUES (?, ?, ?, ?)");
     $stmt->bind_param("iisd", $sunday_id, $category_id, $description, $amount);
